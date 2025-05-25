@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  etl-fipe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./output:/app/output
+    container_name: etl-fipe
