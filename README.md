@@ -96,10 +96,10 @@ Estimativa de tempo restante
 npm install
 npx tsc
 node dist/etl.js
+```
+
 ✅ Como iniciar o ETL
-bash
-Copy
-Edit
+```bash
 node dist/etl.js
 ```
 Ou via Docker:
