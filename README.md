@@ -65,15 +65,15 @@ Edit
 ```bash
 docker-compose build
 docker-compose up
+```
 ➡️ Arquivos gerados em: ./output
 
 📊 Logs de execução
 Logs salvos automaticamente em:
 
-lua
-Copy
-Edit
+```bash
 /output/etl-log-<timestamp>.txt
+```
 Inclui:
 
 Total de requisições feitas
@@ -83,6 +83,7 @@ Tempo médio por requisição
 Estimativa de tempo restante
 
 📁 Dados gerados
+
 /output/referencia.json
 
 /output/marca.json
@@ -96,9 +97,7 @@ Estimativa de tempo restante
 /output/detalhe_veiculo.json
 
 ⚙️ Como rodar localmente
-bash
-Copy
-Edit
+```bash
 npm install
 npx tsc
 node dist/etl.js
@@ -107,12 +106,12 @@ bash
 Copy
 Edit
 node dist/etl.js
+```
 Ou via Docker:
 
-bash
-Copy
-Edit
+```bash
 docker-compose up
+```
 📝 Licença
 MIT
 
