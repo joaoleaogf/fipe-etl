@@ -1,19 +1,29 @@
 import { Logger } from './logger';
 import { extrairReferencias, extrairMarcas, extrairModelos, extrairAnos, extrairDetalhe } from './api';
-import { inserirReferencia, inserirMarca, inserirModelo, inserirAno, inserirVeiculo, inserirDetalheVeiculo } from './db';
+import { inserirReferencia, inserirMarca, inserirModelo, inserirAno, inserirVeiculo, inserirDetalheVeiculo, inserirRejeitado } from './db'; 
 import { VehicleDetail } from './models/api-models';
 import removeAccents from 'remove-accents';
+import fs from 'fs';
 
 const logger = new Logger();
 
+// Função auxiliar para logar erros em erros_etl.log
+function logErro(erro: string, dado?: any) {
+  const logMsg = `${new Date().toISOString()} - ${erro} - Dado: ${JSON.stringify(dado)}\n`;
+  fs.appendFileSync('erros_etl.log', logMsg);
+}
 
+/**
+ * Estima o total de requisições necessárias para o ETL completo
+ */
 export async function estimarTotalRequisicoes(logger: Logger): Promise<number> {
-  let total = 1 + 1;  // 1 (referências) + 1 (marcas)
   logger.log('Estimando total de requisições...');
+
+  let total = 1 + 1;  // 1 para referências + 1 para marcas
 
   const marcas = await extrairMarcas();
   logger.log(`Total de marcas encontradas: ${marcas.length}`);
-  total += marcas.length;  // Para modelos de cada marca
+  total += marcas.length;
 
   let totalModelos = 0;
   let totalAnos = 0;
@@ -21,12 +31,12 @@ export async function estimarTotalRequisicoes(logger: Logger): Promise<number> {
   for (const marca of marcas) {
     const modelos = await extrairModelos(marca.codigo);
     totalModelos += modelos.length;
-    total += modelos.length;  // Para anos de cada modelo
+    total += modelos.length;
 
     for (const modelo of modelos) {
       const anos = await extrairAnos(marca.codigo, modelo.codigo);
       totalAnos += anos.length;
-      total += anos.length;  // Para detalhes de cada ano
+      total += anos.length;
     }
   }
 
@@ -38,7 +48,10 @@ export async function estimarTotalRequisicoes(logger: Logger): Promise<number> {
 }
 
 function mesParaNumero(mes: string): number {
-  const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const meses = [
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+    'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+  ];
   const index = meses.findIndex(m => m.toLowerCase() === mes.toLowerCase());
   return index >= 0 ? index + 1 : 0;
 }
@@ -49,13 +62,30 @@ function limparDetalhe(dado: VehicleDetail): any {
   const combustivel = removeAccents(dado.combustivel.trim());
   const siglaCombustivel = removeAccents(dado.siglaCombustivel.trim());
 
-  const valorNumerico = parseFloat(dado.valor.replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
+  const valorNumerico = parseFloat(
+    dado.valor.replace('R$', '').replace(/\./g, '').replace(',', '.').trim()
+  );
+
   const tipoValido = [1, 2, 3].includes(dado.tipoVeiculo) ? dado.tipoVeiculo : null;
 
   const partesMes = dado.mesReferencia.split(/ de |\/| /);
-  const mesReferenciaFormatada = `${partesMes[1]}-${String(mesParaNumero(partesMes[0])).padStart(2, '0')}`;
+  const ano = partesMes[1];
+  const mes = mesParaNumero(partesMes[0]);
+  const mesReferenciaFormatada = `${ano}-${String(mes).padStart(2, '0')}`;
 
-  return { marca, modelo, anoModelo: dado.anoModelo, combustivel, siglaCombustivel, codigoFipe: dado.codigoFipe, valor: valorNumerico, tipoVeiculo: tipoValido, mesReferencia: mesReferenciaFormatada };
+  const codigoFipeValido = /^\d{6}-\d$/.test(dado.codigoFipe) ? dado.codigoFipe : null;
+
+  return {
+    marca,
+    modelo,
+    anoModelo: dado.anoModelo,
+    combustivel,
+    siglaCombustivel,
+    codigoFipe: codigoFipeValido,
+    valor: valorNumerico,
+    tipoVeiculo: tipoValido,
+    mesReferencia: mesReferenciaFormatada
+  };
 }
 
 async function executarETLCompleto() {
@@ -63,7 +93,7 @@ async function executarETLCompleto() {
 
   const referencias = await extrairReferencias();
   logger.setTotalEstimado(referencias.length);
-  
+
   for (const ref of referencias) {
     await inserirReferencia(ref);
     logger.incrementRequisicao();
@@ -95,6 +125,7 @@ async function executarETLCompleto() {
         logger.logProgresso();
 
         const detalheRaw = await extrairDetalhe(marca.codigo, modelo.codigo, ano.codigo);
+
         const detalhe: VehicleDetail = {
           valor: detalheRaw.price,
           marca: detalheRaw.brand,
@@ -108,8 +139,35 @@ async function executarETLCompleto() {
         };
 
         const dadoLimpo = limparDetalhe(detalhe);
-        await inserirVeiculo({ codigoMo: modelo.codigo, combustivel: dadoLimpo.combustivel, tipoVeiculo: dadoLimpo.tipoVeiculo, preco: dadoLimpo.valor });
-        await inserirDetalheVeiculo(dadoLimpo);
+
+        const camposFaltantes = Object.entries(dadoLimpo).filter(([_, v]) => v === null || v === undefined || v === '');
+
+        if (camposFaltantes.length > 0) {
+          logErro('Campos faltantes ou inválidos', dadoLimpo);
+          await inserirRejeitado(dadoLimpo);
+          logger.incrementRequisicao();
+          logger.logProgresso();
+          continue; // pula para o próximo
+        }
+
+        if (
+          dadoLimpo.codigoFipe &&
+          dadoLimpo.valor > 0 &&
+          [1, 2, 3].includes(dadoLimpo.tipoVeiculo) &&
+          /^\d{4}-\d{2}$/.test(dadoLimpo.mesReferencia)
+        ) {
+          await inserirVeiculo({
+            codigoMo: modelo.codigo,
+            combustivel: dadoLimpo.combustivel,
+            tipoVeiculo: dadoLimpo.tipoVeiculo,
+            preco: dadoLimpo.valor
+          });
+
+          await inserirDetalheVeiculo(dadoLimpo);
+        } else {
+          logErro('Dados inconsistentes', dadoLimpo);
+          await inserirRejeitado(dadoLimpo);
+        }
 
         logger.incrementRequisicao();
         logger.logProgresso();
@@ -120,11 +178,20 @@ async function executarETLCompleto() {
   logger.log('ETL completo (modo arquivo).');
 }
 
+async function main(estimarRequisicoes: boolean) {
+  if (estimarRequisicoes) {
+    logger.log('Estimando total de requisições...');
+    const totalEstimado = await estimarTotalRequisicoes(logger).catch(e => {
+      logger.log(`Erro ao estimar total de requisições: ${e}`);
+      return 0;
+    });
 
+    logger.setTotalEstimado(totalEstimado);
+  }
 
-async function main() {
-  const totalEstimado = await estimarTotalRequisicoes(logger);
-  logger.setTotalEstimado(totalEstimado);
+  logger.log('Iniciando ETL completo (modo arquivo).');
 
-  // executarETLCompleto().catch(e => logger.log(`Erro no ETL: ${e}`));
+  await executarETLCompleto().catch(e => logger.log(`Erro no ETL: ${e}`));
 }
+
+main(true);
