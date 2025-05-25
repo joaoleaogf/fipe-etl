@@ -6,7 +6,7 @@ Projeto construído em **Node.js** + **TypeScript**, com estrutura modularizada 
 ---
 
 ## 📦 Estrutura do Projeto
-
+```yaml
 /src
 ├── api.ts # Funções de extração de dados da API FIPE
 ├── db.ts # Simulação de inserção, salvando em arquivos
@@ -14,14 +14,9 @@ Projeto construído em **Node.js** + **TypeScript**, com estrutura modularizada 
 ├── estimativa.ts # Cálculo automático de quantidade de requisições
 ├── logger.ts # Logger com estimativa de tempo e progresso
 └── models/
-└── api-models.ts # Modelos de dados FIPE
-
+└──── api-models.ts # Modelos de dados FIPE
 /output # Arquivos JSON gerados pelo ETL
-
-yaml
-Copy
-Edit
-
+```
 ---
 
 ## 🚀 Funcionalidades
